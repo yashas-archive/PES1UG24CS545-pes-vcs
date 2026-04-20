@@ -174,9 +174,37 @@ static int write_tree_recursive(IndexEntry *entries, int count, const char *pref
 // Build a tree hierarchy from the current index and write all tree objects.
 int tree_from_index(ObjectID *id_out) {
     Index index;
-    if (index_load(&index) != 0) return -1;
+    index.count = 0;
+
+    FILE *f = fopen(INDEX_FILE, "r");
+    if (f) {
+        char hex[HASH_HEX_SIZE + 1];
+        uint32_t mode;
+        uint64_t mtime;
+        uint32_t size;
+        char path[512];
+
+        while (index.count < MAX_INDEX_ENTRIES) {
+            int ret = fscanf(f, "%o %64s %llu %u %511s\n",
+                             &mode, hex,
+                             (unsigned long long *)&mtime,
+                             &size, path);
+            if (ret == EOF) break;
+            if (ret != 5) break;
+
+            IndexEntry *entry = &index.entries[index.count];
+            entry->mode = mode;
+            entry->mtime_sec = mtime;
+            entry->size = size;
+            strncpy(entry->path, path, sizeof(entry->path) - 1);
+            entry->path[sizeof(entry->path) - 1] = '\0';
+            hex_to_hash(hex, &entry->hash);
+            index.count++;
+        }
+        fclose(f);
+    }
+
     if (index.count == 0) {
-        // Empty tree
         Tree empty_tree;
         empty_tree.count = 0;
         void *tree_data;
@@ -186,5 +214,6 @@ int tree_from_index(ObjectID *id_out) {
         free(tree_data);
         return r;
     }
+
     return write_tree_recursive(index.entries, index.count, "", id_out);
 }
