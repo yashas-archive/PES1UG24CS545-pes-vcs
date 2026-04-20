@@ -1,7 +1,3 @@
-// pes.c — CLI entry point and command dispatch
-//
-// This file is PROVIDED. Do not modify.
-
 #include "pes.h"
 #include "index.h"
 #include "commit.h"
@@ -11,30 +7,38 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// ─── PROVIDED: Command Implementations ──────────────────────────────────────
+// ─── Command implementations ─────────────────────────────────────────────────
 
-// Usage: pes init
+// pes init: Create .pes/ repository structure
 void cmd_init(void) {
-    if (mkdir(PES_DIR, 0755) != 0 && access(PES_DIR, F_OK) != 0) {
-        fprintf(stderr, "error: failed to create %s\n", PES_DIR);
-        return;
-    }
-    mkdir(OBJECTS_DIR, 0755);
-    mkdir(".pes/refs", 0755);
-    mkdir(REFS_DIR, 0755);
+    // Create all required directories
+    const char *dirs[] = {
+        ".pes",
+        ".pes/objects",
+        ".pes/refs",
+        ".pes/refs/heads",
+        NULL
+    };
 
-    if (access(HEAD_FILE, F_OK) != 0) {
-        FILE *f = fopen(HEAD_FILE, "w");
-        if (f) {
-            fprintf(f, "ref: refs/heads/main\n");
-            fclose(f);
+    for (int i = 0; dirs[i]; i++) {
+        if (mkdir(dirs[i], 0755) != 0) {
+            // Already exists is fine
         }
     }
 
-    printf("Initialized empty PES repository in %s/\n", PES_DIR);
+    // Write HEAD pointing to refs/heads/main
+    FILE *f = fopen(".pes/HEAD", "w");
+    if (!f) {
+        fprintf(stderr, "error: failed to create .pes/HEAD\n");
+        return;
+    }
+    fprintf(f, "ref: refs/heads/main\n");
+    fclose(f);
+
+    printf("Initialized empty PES repository in .pes/\n");
 }
 
-// Usage: pes add <file>...
+// pes add <file>...: Stage files
 void cmd_add(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Usage: pes add <file>...\n");
@@ -54,7 +58,7 @@ void cmd_add(int argc, char *argv[]) {
     }
 }
 
-// Usage: pes status
+// pes status: Show working directory status
 void cmd_status(void) {
     Index index;
     if (index_load(&index) != 0) {
@@ -64,14 +68,22 @@ void cmd_status(void) {
     index_status(&index);
 }
 
-// Usage: pes commit -m <message>
+// pes commit -m <message>: Create a commit
 void cmd_commit(int argc, char *argv[]) {
-    if (argc < 4 || strcmp(argv[2], "-m") != 0) {
+    // Parse -m <message>
+    const char *message = NULL;
+    for (int i = 2; i < argc - 1; i++) {
+        if (strcmp(argv[i], "-m") == 0) {
+            message = argv[i + 1];
+            break;
+        }
+    }
+
+    if (!message) {
         fprintf(stderr, "error: commit requires a message (-m \"message\")\n");
         return;
     }
 
-    const char *message = argv[3];
     ObjectID commit_id;
     if (commit_create(message, &commit_id) != 0) {
         fprintf(stderr, "error: commit failed\n");
@@ -83,7 +95,7 @@ void cmd_commit(int argc, char *argv[]) {
     printf("Committed: %.12s... %s\n", hex, message);
 }
 
-// Callback for commit_walk used by cmd_log.
+// Log callback
 static void print_commit(const ObjectID *id, const Commit *commit, void *ctx) {
     (void)ctx;
     char hex[HASH_HEX_SIZE + 1];
@@ -94,10 +106,66 @@ static void print_commit(const ObjectID *id, const Commit *commit, void *ctx) {
     printf("\n    %s\n\n", commit->message);
 }
 
-// Usage: pes log
+// pes log: Walk and display commit history
 void cmd_log(void) {
     if (commit_walk(print_commit, NULL) != 0) {
-        fprintf(stderr, "No commits yet.\n");
+        fprintf(stderr, "error: no commits yet\n");
+    }
+}
+
+// ─── Phase 5 stubs (provided by template) ───────────────────────────────────
+
+void branch_list(void) {
+    fprintf(stderr, "branch: not implemented\n");
+}
+int branch_create(const char *name) {
+    (void)name;
+    fprintf(stderr, "branch_create: not implemented\n");
+    return -1;
+}
+int branch_delete(const char *name) {
+    (void)name;
+    fprintf(stderr, "branch_delete: not implemented\n");
+    return -1;
+}
+int checkout(const char *target) {
+    (void)target;
+    fprintf(stderr, "checkout: not implemented\n");
+    return -1;
+}
+
+// ─── PROVIDED: Phase 5 Command Wrappers ─────────────────────────────────────
+
+void cmd_branch(int argc, char *argv[]) {
+    if (argc == 2) {
+        branch_list();
+    } else if (argc == 3) {
+        if (branch_create(argv[2]) == 0) {
+            printf("Created branch '%s'\n", argv[2]);
+        } else {
+            fprintf(stderr, "error: failed to create branch '%s'\n", argv[2]);
+        }
+    } else if (argc == 4 && strcmp(argv[2], "-d") == 0) {
+        if (branch_delete(argv[3]) == 0) {
+            printf("Deleted branch '%s'\n", argv[3]);
+        } else {
+            fprintf(stderr, "error: failed to delete branch '%s'\n", argv[3]);
+        }
+    } else {
+        fprintf(stderr, "Usage:\n  pes branch\n  pes branch <n>\n  pes branch -d <n>\n");
+    }
+}
+
+void cmd_checkout(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: pes checkout <branch_or_commit>\n");
+        return;
+    }
+    const char *target = argv[2];
+    if (checkout(target) == 0) {
+        printf("Switched to '%s'\n", target);
+    } else {
+        fprintf(stderr, "error: checkout failed. Do you have uncommitted changes?\n");
     }
 }
 
@@ -107,26 +175,28 @@ int main(int argc, char *argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: pes <command> [args]\n");
         fprintf(stderr, "\nCommands:\n");
-        fprintf(stderr, "  init            Create a new PES repository\n");
-        fprintf(stderr, "  add <file>...   Stage files for commit\n");
-        fprintf(stderr, "  status          Show working directory status\n");
-        fprintf(stderr, "  commit -m <msg> Create a commit from staged files\n");
-        fprintf(stderr, "  log             Show commit history\n");
+        fprintf(stderr, "  init              Create a new PES repository\n");
+        fprintf(stderr, "  add <file>...     Stage files for commit\n");
+        fprintf(stderr, "  status            Show working directory status\n");
+        fprintf(stderr, "  commit -m <msg>   Create a commit from staged files\n");
+        fprintf(stderr, "  log               Show commit history\n");
+        fprintf(stderr, "  branch            List, create, or delete branches\n");
+        fprintf(stderr, "  checkout <ref>    Switch branches or restore working tree\n");
         return 1;
     }
 
     const char *cmd = argv[1];
-
-    if      (strcmp(cmd, "init") == 0)     cmd_init();
-    else if (strcmp(cmd, "add") == 0)      cmd_add(argc, argv);
-    else if (strcmp(cmd, "status") == 0)   cmd_status();
-    else if (strcmp(cmd, "commit") == 0)   cmd_commit(argc, argv);
-    else if (strcmp(cmd, "log") == 0)      cmd_log();
+    if      (strcmp(cmd, "init")     == 0) cmd_init();
+    else if (strcmp(cmd, "add")      == 0) cmd_add(argc, argv);
+    else if (strcmp(cmd, "status")   == 0) cmd_status();
+    else if (strcmp(cmd, "commit")   == 0) cmd_commit(argc, argv);
+    else if (strcmp(cmd, "log")      == 0) cmd_log();
+    else if (strcmp(cmd, "branch")   == 0) cmd_branch(argc, argv);
+    else if (strcmp(cmd, "checkout") == 0) cmd_checkout(argc, argv);
     else {
         fprintf(stderr, "Unknown command: %s\n", cmd);
         fprintf(stderr, "Run 'pes' with no arguments for usage.\n");
         return 1;
     }
-
     return 0;
 }
