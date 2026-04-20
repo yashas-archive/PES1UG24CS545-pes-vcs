@@ -7,6 +7,7 @@
 // "<mode-as-ascii-octal> <n>\0<32-byte-binary-hash>"
 
 #include "tree.h"
+#include "index.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
