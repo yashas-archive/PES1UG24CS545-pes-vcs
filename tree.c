@@ -22,6 +22,7 @@
 // ─── Forward declarations ────────────────────────────────────────────────────
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 int index_load(Index *index);
+int index_save(const Index *index);
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
