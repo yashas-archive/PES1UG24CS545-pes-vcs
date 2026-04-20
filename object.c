@@ -146,11 +146,9 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 
 // Read an object from the store.
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // 1. Build path from hash
     char path[512];
     object_path(id, path, sizeof(path));
 
-    // 2. Open and read the entire file
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
 
@@ -169,31 +167,31 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
         return -1;
     }
 
-    if (fread(raw, 1, (size_t)file_size, f) != (size_t)file_size) {
-        fclose(f);
+    size_t read_bytes = fread(raw, 1, (size_t)file_size, f);
+    fclose(f);
+
+    if (read_bytes != (size_t)file_size) {
         free(raw);
         return -1;
     }
-    fclose(f);
 
-    // 3. Verify integrity: recompute hash and compare to expected
+    // Verify integrity FIRST before anything else
     ObjectID computed;
     compute_hash(raw, (size_t)file_size, &computed);
     if (memcmp(computed.hash, id->hash, HASH_SIZE) != 0) {
         free(raw);
-        return -1;
+        return -1;  // Corruption detected
     }
 
-    // 4. Find the null byte separating header from data
+    // Find null byte separating header from data
     uint8_t *null_byte = memchr(raw, '\0', (size_t)file_size);
     if (!null_byte) {
         free(raw);
         return -1;
     }
 
-    // 5. Parse the header: "<type> <size>"
-    char header[64];
     size_t header_len = null_byte - raw;
+    char header[64];
     if (header_len >= sizeof(header)) {
         free(raw);
         return -1;
@@ -201,7 +199,6 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     memcpy(header, raw, header_len);
     header[header_len] = '\0';
 
-    // Parse type and size from header
     char type_str[16];
     size_t data_size;
     if (sscanf(header, "%15s %zu", type_str, &data_size) != 2) {
@@ -209,33 +206,28 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
         return -1;
     }
 
-    // 6. Set type_out
     if (type_out) {
-        if (strcmp(type_str, "blob") == 0)        *type_out = OBJ_BLOB;
-        else if (strcmp(type_str, "tree") == 0)   *type_out = OBJ_TREE;
+        if      (strcmp(type_str, "blob")   == 0) *type_out = OBJ_BLOB;
+        else if (strcmp(type_str, "tree")   == 0) *type_out = OBJ_TREE;
         else if (strcmp(type_str, "commit") == 0) *type_out = OBJ_COMMIT;
         else { free(raw); return -1; }
     }
 
-    // 7. Extract and return data portion
-    uint8_t *data_start = null_byte + 1;
     size_t actual_data_len = (size_t)file_size - (header_len + 1);
-
     if (actual_data_len != data_size) {
         free(raw);
         return -1;
     }
 
-    uint8_t *out = malloc(actual_data_len + 1); // +1 for safety null terminator
+    uint8_t *out = malloc(actual_data_len + 1);
     if (!out) {
         free(raw);
         return -1;
     }
-    memcpy(out, data_start, actual_data_len);
+    memcpy(out, null_byte + 1, actual_data_len);
     out[actual_data_len] = '\0';
 
     free(raw);
-
     *data_out = out;
     *len_out = actual_data_len;
     return 0;
